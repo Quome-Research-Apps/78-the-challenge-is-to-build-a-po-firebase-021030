@@ -1,0 +1,62 @@
+name: Deploy to Quome 
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  DOCKER_REPO_NAME: quome-benchmarks
+  DOCKER_BUILD_CONTEXT: ./
+  DOCKERFILE_PATH: ./Dockerfile
+
+jobs:
+  build:
+    name: Push Docker image to Docker Hub
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          tags: type=sha
+          images: ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_REPO_NAME }}
+          labels: |
+            org.opencontainers.image.title=${{ env.DOCKER_REPO_NAME }}
+            org.opencontainers.image.description=Quome Benchmark Application
+            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        with:
+          context: ${{ env.DOCKER_BUILD_CONTEXT }}
+          file: ${{ env.DOCKERFILE_PATH }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Quome Deploy
+        env:
+          API_KEY: ${{ secrets.QUOME_API_KEY }}
+          APP_ID: ${{ secrets.APP_ID }}
+          ORG_ID: ${{ secrets.ORG_ID }}
+          TAG: ${{ steps.meta.outputs.tags }}
+        run: bash .github/deploy_to_quome.sh
